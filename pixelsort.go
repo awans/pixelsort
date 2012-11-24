@@ -113,39 +113,38 @@ type WritableImage interface {
 	Set(x, y int, c color.Color)
 	At(x, y int) color.Color
 	Bounds() image.Rectangle
-	ColorModel() color.Model
 }
 
 // using this to avoid writing sortRows and sortCols
 type SwitchyRGBA struct {
-	WritableImage
+	*image.RGBA
 	transposed bool
 }
 
 func (sr SwitchyRGBA) At(x, y int) (out color.Color) {
 	if sr.transposed {
-		out = sr.WritableImage.At(y, x)
+		out = sr.RGBA.At(y, x)
 	} else {
-		out = sr.WritableImage.At(x, y)
+		out = sr.RGBA.At(x, y)
 	}
 	return
 }
 
 func (sr SwitchyRGBA) Set(x, y int, c color.Color) {
 	if sr.transposed {
-		sr.WritableImage.Set(y, x, c)
+		sr.RGBA.Set(y, x, c)
 	} else {
-		sr.WritableImage.Set(x, y, c)
+		sr.RGBA.Set(x, y, c)
 	}
 	return
 }
 
 func (sr SwitchyRGBA) Bounds() (out image.Rectangle) {
 	if sr.transposed {
-		b := sr.WritableImage.Bounds()
+		b := sr.RGBA.Bounds()
 		out = image.Rect(b.Min.Y, b.Min.X, b.Max.Y, b.Max.X)
 	} else {
-		out = sr.WritableImage.Bounds()
+		out = sr.RGBA.Bounds()
 	}
 	return
 }
@@ -166,15 +165,32 @@ func pixelSort(img image.Image) image.Image {
 }
 
 func main() {
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: %s [filename.jpeg] \n", os.Args[0])
+		flag.PrintDefaults()
+	}
 	flag.Parse()
+
+
+	if len(flag.Args())	== 0 {
+		flag.Usage()
+		os.Exit(-1)
+	}
+	
 	for _, input := range flag.Args() {
 		f, err := os.Open(input)
 		if err != nil {
-			fmt.Printf("Failed to open %s", input)
+			fmt.Printf("Failed to open %s, %v\n", input, err)
 			os.Exit(-1)
 		}
 
 		img, err := jpeg.Decode(f)
+		if err != nil {
+			fmt.Printf("Failed to decode %s, %v\n", input, err)
+			os.Exit(-1)
+		}
+		
+		
 		for threshold = 0; threshold < 55000; threshold += 5000 {
 			sortedImg := img
 			for i := 0; i < *passes; i++ {
