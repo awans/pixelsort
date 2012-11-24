@@ -7,6 +7,7 @@ import (
 	"image/color"
 	"image/draw"
 	"image/jpeg"
+	"image/png"
 	"os"
 	"sort"
 )
@@ -14,16 +15,27 @@ import (
 var nocol = flag.Bool("nocol", false, "don't sort columns")
 var norow = flag.Bool("norow", false, "don't sort rows")
 var passes = flag.Int("p", 1, "the number of passes to make")
+
+var maxThreshold = flag.Float64("tmax", 60000, "max luma threshold")
+var minThreshold = flag.Float64("tmin", 0, "min luma threshold")
+var thresholdInc = flag.Float64("tinc", 5000, "threshold increment amount")
 var threshold = 0.0
+
+func init() {
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: %s [files...]",
+			os.Args[0])
+		flag.PrintDefaults()
+	}
+
+}
 
 func luma(pixel color.Color) float64 {
 	r, g, b, _ := pixel.RGBA()
 
-	luma := .3*float64(r) +
+	return .3*float64(r) +
 		.59*float64(g) +
 		.11*float64(b)
-
-	return luma
 }
 
 type SortableColors []color.Color
@@ -38,7 +50,6 @@ func (m SortableColors) Swap(i, j int) {
 	m[i] = temp
 }
 
-// this func defines the sort order of the pixels
 func (m SortableColors) Less(i, j int) bool {
 	return luma(m[i]) > luma(m[j])
 }
@@ -50,133 +61,76 @@ func rgbaFromImage(src image.Image) (out *image.RGBA) {
 	return
 }
 
-func findLumaColBounds(rgba WritableImage, x int, ymin int) (yfirst, ynext int) {
-	b := rgba.Bounds()
+func sortSequence(seq []color.Color) {
+	for i := 0; i < len(seq); {
+		runEnd := len(seq)
+		foundRun := false
 
-	yfirst, ynext = -1, b.Max.Y
-	for y := ymin; yfirst == -1 && y < b.Max.Y; y++ {
-		if luma(rgba.At(x, y)) > threshold {
-			yfirst = y
+		for j := i; j < len(seq); j++ {
+			if luma(seq[j]) > threshold {
+				foundRun = true
+				i = j
+				for ; j < len(seq); j++ {
+					if luma(seq[j]) < threshold {
+						runEnd = j
+						break
+					}
+				}
+				break
+			}
 		}
-	}
 
-	if yfirst == -1 {
-		return
-	}
-
-	// then next one above
-	for y := yfirst; ynext == b.Max.Y && y < b.Max.Y; y++ {
-		if luma(rgba.At(x, y)) < threshold {
-			ynext = y
-		}
-	}
-	return
-}
-
-func sortCol(rgba WritableImage, x int) {
-	b := rgba.Bounds()
-	for ymin := 0; ymin < b.Max.Y; {
-
-		yfirst, ynext := findLumaColBounds(rgba, x, ymin)
-
-		if yfirst == -1 {
+		if !foundRun {
 			break
 		}
 
-		// build the to-be-sorted color array
-		slice := make([]color.Color, ynext-yfirst)
-		for y := yfirst; y < ynext; y++ {
-			slice[y-yfirst] = rgba.At(x, y)
-		}
+		run := seq[i:runEnd]
+		sort.Sort(SortableColors(run))
 
-		// sort it by luma
-		sort.Sort(SortableColors(slice))
-
-		// write it back out
-		for y := yfirst; y < ynext; y++ {
-			rgba.Set(x, y, slice[y-yfirst])
-		}
-
-		ymin = ynext + 1
+		i = runEnd + 1
 	}
-}
-
-func sortCols(rgba WritableImage) {
-	b := rgba.Bounds()
-	for x := b.Min.X; x < b.Max.X; x++ {
-		sortCol(rgba, x)
-	}
-	return
-}
-
-type WritableImage interface {
-	Set(x, y int, c color.Color)
-	At(x, y int) color.Color
-	Bounds() image.Rectangle
-}
-
-// using this to avoid writing sortRows and sortCols
-type SwitchyRGBA struct {
-	*image.RGBA
-	transposed bool
-}
-
-func (sr SwitchyRGBA) At(x, y int) (out color.Color) {
-	if sr.transposed {
-		out = sr.RGBA.At(y, x)
-	} else {
-		out = sr.RGBA.At(x, y)
-	}
-	return
-}
-
-func (sr SwitchyRGBA) Set(x, y int, c color.Color) {
-	if sr.transposed {
-		sr.RGBA.Set(y, x, c)
-	} else {
-		sr.RGBA.Set(x, y, c)
-	}
-	return
-}
-
-func (sr SwitchyRGBA) Bounds() (out image.Rectangle) {
-	if sr.transposed {
-		b := sr.RGBA.Bounds()
-		out = image.Rect(b.Min.Y, b.Min.X, b.Max.Y, b.Max.X)
-	} else {
-		out = sr.RGBA.Bounds()
-	}
-	return
 }
 
 func pixelSort(img image.Image) image.Image {
-	rgba := SwitchyRGBA{rgbaFromImage(img), false}
+	rgba := rgbaFromImage(img)
+	b := rgba.Bounds()
 
 	if !*norow {
-		rgba.transposed = true
-		sortCols(rgba)
-		rgba.transposed = false
-	}
-	if !*nocol {
-		sortCols(rgba)
+		seq := make([]color.Color, b.Max.X)
+		for y := 0; y < b.Max.Y; y++ {
+			for i := range seq {
+				seq[i] = rgba.At(i, y)
+			}
+			sortSequence(seq)
+			for i := range seq {
+				rgba.Set(i, y, seq[i])
+			}
+		}
 	}
 
+	if !*nocol {
+		seq := make([]color.Color, b.Max.Y)
+		for x := 0; x < b.Max.X; x++ {
+			for i := range seq {
+				seq[i] = rgba.At(x, i)
+			}
+			sortSequence(seq)
+			for i := range seq {
+				rgba.Set(x, i, seq[i])
+			}
+		}
+	}
 	return rgba
 }
 
 func main() {
-	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s [filename.jpeg] \n", os.Args[0])
-		flag.PrintDefaults()
-	}
 	flag.Parse()
 
-
-	if len(flag.Args())	== 0 {
+	if len(flag.Args()) == 0 {
 		flag.Usage()
 		os.Exit(-1)
 	}
-	
+
 	for _, input := range flag.Args() {
 		f, err := os.Open(input)
 		if err != nil {
@@ -184,26 +138,41 @@ func main() {
 			os.Exit(-1)
 		}
 
-		img, err := jpeg.Decode(f)
+		img, format, err := image.Decode(f)
 		if err != nil {
-			fmt.Printf("Failed to decode %s, %v\n", input, err)
+			fmt.Printf("Failed to decode %s, %v, %v\n", input, format, err)
 			os.Exit(-1)
 		}
-		
-		
-		for threshold = 0; threshold < 55000; threshold += 5000 {
+
+		for threshold = *minThreshold; threshold < *maxThreshold; threshold += *thresholdInc {
 			sortedImg := img
 			for i := 0; i < *passes; i++ {
 				sortedImg = pixelSort(sortedImg)
 			}
 
 			output := fmt.Sprintf("sorted_%dx_%fl_%s", *passes, threshold, input)
+			if format == "gif" {
+				output = fmt.Sprint(output[:3], "jpeg")
+			}
+			
 			newFile, err := os.Create(output)
 			if err != nil {
 				fmt.Printf("Failed to write %s", output)
 				os.Exit(-1)
 			}
-			jpeg.Encode(newFile, sortedImg, nil)
+			
+			switch format {
+				case "jpeg":
+					jpeg.Encode(newFile, sortedImg, nil)
+				case "png":
+					png.Encode(newFile, sortedImg)
+				case "gif":
+					jpeg.Encode(newFile, sortedImg, nil)
+				default:
+					fmt.Printf("Unsupported image format %v\n", format)
+					os.Exit(-1)
+			}
+			
 		}
 	}
 }
