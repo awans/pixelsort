@@ -23,7 +23,7 @@ var threshold = 0.0
 
 func init() {
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s [files...]",
+		fmt.Fprintf(os.Stderr, "Usage: %s [files...]\n",
 			os.Args[0])
 		flag.PrintDefaults()
 	}
@@ -33,9 +33,9 @@ func init() {
 func luma(pixel color.Color) float64 {
 	r, g, b, _ := pixel.RGBA()
 
-	return .3*float64(r) +
-		.59*float64(g) +
-		.11*float64(b)
+	return .2126*float64(r) +
+		.7152*float64(g) +
+		.0722*float64(b)
 }
 
 type SortableColors []color.Color
@@ -154,25 +154,24 @@ func main() {
 			if format == "gif" {
 				output = fmt.Sprint(output[:3], "jpeg")
 			}
-			
+
 			newFile, err := os.Create(output)
 			if err != nil {
 				fmt.Printf("Failed to write %s", output)
 				os.Exit(-1)
 			}
-			
+
 			switch format {
-				case "jpeg":
-					jpeg.Encode(newFile, sortedImg, nil)
-				case "png":
-					png.Encode(newFile, sortedImg)
-				case "gif":
-					jpeg.Encode(newFile, sortedImg, nil)
-				default:
-					fmt.Printf("Unsupported image format %v\n", format)
-					os.Exit(-1)
+			case "jpeg":
+				jpeg.Encode(newFile, sortedImg, nil)
+			case "png":
+				png.Encode(newFile, sortedImg)
+			case "gif":
+				jpeg.Encode(newFile, sortedImg, nil)
+			default:
+				fmt.Printf("Unsupported image format %v\n", format)
+				os.Exit(-1)
 			}
-			
 		}
 	}
 }
